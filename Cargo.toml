@@ -1,0 +1,12 @@
+[package]
+name = "clipboard_server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.41.0", features = ["full"] }
+futures = "0.3.31"
+json = "0.12.4"
+unescape = "0.1.0"
+clipboard = "0.5.0"
+tokio-listener = "0.4.3"
