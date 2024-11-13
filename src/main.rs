@@ -28,7 +28,7 @@ async fn read_request_string(conn: &mut Connection) -> String {
         }
 
         if cfg!(debug_assertions) {
-            println!("{:?}", String::from_utf8(buf.to_vec()).unwrap());
+            println!("{}", String::from_utf8(buf.to_vec()).unwrap());
         }
         rst_vec.extend(buf.iter());
         rst_size += size;
@@ -40,7 +40,7 @@ async fn read_request_string(conn: &mut Connection) -> String {
     }
 
     if cfg!(debug_assertions) {
-        eprintln!("{:?}", String::from_utf8(rst_vec.clone()).unwrap().trim());
+        eprintln!("{}", String::from_utf8(rst_vec.clone()).unwrap().trim());
     }
 
     String::from_utf8(rst_vec[0..rst_size].to_vec()).expect("Decode request string error!")
@@ -90,7 +90,7 @@ async fn handle_clients_pasting(conn: &mut Connection, ctx: &mut ClipboardContex
     let response_bytes = response_json.to_string();
 
     if cfg!(debug_assertions) {
-        println!("response: {:?}", response_json.to_string());
+        println!("response: {}", response_json.to_string());
     }
 
     conn.write(response_bytes.as_bytes()).await.unwrap();
