@@ -27,9 +27,6 @@ async fn read_request_string(conn: &mut Connection) -> String {
             break;
         }
 
-        if cfg!(debug_assertions) {
-            println!("{}", String::from_utf8(buf.to_vec()).unwrap());
-        }
         rst_vec.extend(buf.iter());
         rst_size += size;
 
@@ -124,6 +121,8 @@ async fn main() {
                     eprintln!("Unsupported command!")
                 }
             }
+
+            conn.shutdown().await.unwrap();
         });
     }
 }

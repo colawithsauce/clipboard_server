@@ -17,14 +17,14 @@ Bang! you can copy with `cat xxx.txt | clip.py copy`, and paste with `clip.py pa
 import socket
 import argparse
 from json import JSONEncoder, JSONDecoder
-from sys import stderr
+from sys import stderr, stdin
 
 def send(ss: str):
     s = socket.socket()
     s.connect(('127.0.0.1',33304))
 
-    if ss.endswith('\n'):
-        ss = ss[:-1]
+    # if ss.endswith('\n'):
+    #     ss = ss[:-1]
 
     request = {
         "type": "copy",
@@ -75,13 +75,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.command == "copy":
-        ss = ''
-        while True:
-            try:
-                ss += input() + '\n'
-            except EOFError:
-                break
-
+        lines = stdin.readlines()
+        ss = "".join(lines)
         send(ss)
     elif args.command == "paste":
         request()
