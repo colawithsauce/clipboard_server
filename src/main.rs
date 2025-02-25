@@ -2,11 +2,9 @@ use json::object;
 use json::JsonValue;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 use tokio_listener::Connection;
 use tokio_listener::ListenerAddress;
-
-use json;
 
 use clipboard::ClipboardContext;
 use clipboard::ClipboardProvider;
@@ -69,29 +67,15 @@ fn get_action(response: String) -> Option<Action> {
     }
 }
 
-fn handle_clients_copy(ss: String, ctx: &mut ClipboardContext) {
-    match ctx.set_contents(ss) {
-        Err(err) => {
-            eprintln!("Error: {}", err);
-        }
-        _ => (),
-    }
-}
-
-async fn handle_clients_pasting(conn: &mut Connection, ctx: &mut ClipboardContext) {
-    let ss = ctx.get_contents().unwrap();
+fn compose_paste_response(content: &str) -> String {
     let response_json = object! {
         "type": "paste",
-        "contents": ss,
+        "contents": content,
     };
-    let response_bytes = response_json.to_string();
-
     if cfg!(debug_assertions) {
-        println!("response: {}", response_json.to_string());
+        eprintln!("response: {}", response_json);
     }
-
-    conn.write(response_bytes.as_bytes()).await.unwrap();
-    conn.write("\n".as_bytes()).await.unwrap();
+    response_json.to_string()
 }
 
 #[tokio::main]
@@ -103,23 +87,52 @@ async fn main() {
         .await
         .unwrap();
     println!("Listening addr {}", addr);
+
+    // 定义消息类型
+    enum ClipboardMsg {
+        Copy(String),
+        Paste(tokio::sync::oneshot::Sender<String>),
+    }
+
+    // 创建专用剪贴板线程
+    let (clip_tx, mut clip_rx) = mpsc::channel(32);
+    std::thread::spawn(move || {
+        let mut ctx = ClipboardContext::new().unwrap();
+        while let Some(msg) = clip_rx.blocking_recv() {
+            match msg {
+                ClipboardMsg::Copy(text) => {
+                    ctx.set_contents(text).unwrap();
+                }
+                ClipboardMsg::Paste(reply) => {
+                    let content = ctx.get_contents().unwrap();
+                    reply.send(content).ok();
+                }
+            }
+        }
+    });
+
     while let Ok((mut conn, _)) = l.accept().await {
-        let m = Mutex::new(ClipboardContext::new().unwrap());
+        let clip_tx = clip_tx.clone();
         tokio::spawn(async move {
             let buf = read_request_string(&mut conn).await;
             let action = get_action(buf);
+
             match action {
                 Some(Action::Copying(ss)) => {
-                    let mut ctx = m.lock().await;
-                    handle_clients_copy(ss, &mut ctx);
+                    // 发送复制请求
+                    clip_tx.send(ClipboardMsg::Copy(ss)).await.unwrap();
                 }
                 Some(Action::Pasting) => {
-                    let mut ctx = m.lock().await;
-                    handle_clients_pasting(&mut conn, &mut ctx).await;
+                    // 创建 oneshot 通道接收回复
+                    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                    clip_tx.send(ClipboardMsg::Paste(reply_tx)).await.unwrap();
+                    let content = reply_rx.await.unwrap();
+                    // 将内容写回 conn
+                    conn.write_all(compose_paste_response(&content).as_bytes())
+                        .await
+                        .unwrap();
                 }
-                _ => {
-                    eprintln!("Unsupported command!")
-                }
+                _ => eprintln!("Unsupported command!"),
             }
 
             conn.shutdown().await.unwrap();
