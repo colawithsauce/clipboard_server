@@ -1,7 +1,7 @@
 
 ## Description
-A simple clipboard server implemented in rust. the client was implemented in python
 
+A simple clipboard server implemented in rust. the client was implemented in python
 
 ## Usage
 
@@ -34,6 +34,7 @@ def send(ss: str):
     json_string = JSONEncoder().encode(request)
 
     s.send(json_string.encode())
+    s.send("\n".encode())
     s.close()
 
 def request():
@@ -85,7 +86,9 @@ if __name__ == '__main__':
 ```
 
 ## Advance settings
+
 - Well, for Emacs Users, into your `.emacs.d` (I recommend this, because i love it.)
+
 ```lisp
 (defun my/copy-handler (text)
     (setq my/copy-process (make-process :name "my/copy"
@@ -101,7 +104,9 @@ if __name__ == '__main__':
   (setq interprogram-cut-function 'my/copy-handler
         interprogram-paste-function 'my/paste-handler)
 ```
+
 - Okay, for Neovim users, into your `init.lua`
+
 ```lua
 vim.g.clipboard = {
   name = "remote",
@@ -115,3 +120,23 @@ vim.g.clipboard = {
   },
 }
 ```
+
+- If you wanna start it on start with systemd
+In your `/usr/local/lib/systemd/user/clipboard_server.service`
+
+```txt
+[Unit]
+Description=Simple Clipboard Service
+
+[Service]
+Type=simple
+ExecStart=/home/colabrewsred/.cargo/bin/clipboard_server
+Restart=on-failure
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+```
+
+Then `systemctl --user enable --now clipboard_server`

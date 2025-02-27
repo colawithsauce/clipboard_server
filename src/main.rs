@@ -1,5 +1,4 @@
 use json::object;
-use json::JsonValue;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
@@ -15,30 +14,31 @@ enum Action {
     Pasting,
 }
 
-async fn read_request_string(conn: &mut Connection) -> String {
-    let buf = &mut [0 as u8; 1024];
-    let mut rst_size = 0;
-    let mut rst_vec: Vec<u8> = Vec::new();
+async fn read_request_string(conn: &mut Connection) -> std::io::Result<String> {
+    let mut buf = Vec::with_capacity(1024);
+    let mut temp_buf = [0u8; 1024];
+
     loop {
-        let size = conn.read(buf).await.expect("read socket failed!");
-        if size == 0 {
-            break;
+        let n = conn.read(&mut temp_buf).await?;
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionAborted,
+                "Connection closed",
+            ));
         }
 
-        rst_vec.extend(buf.iter());
-        rst_size += size;
-
-        // we must ends with '\n'
-        if buf[size - 1] == '\n' as u8 {
+        // 只追加实际读取的字节
+        buf.extend_from_slice(&temp_buf[..n]);
+        // 检查是否有换行符
+        if buf.ends_with(b"\n") {
             break;
         }
     }
 
-    if cfg!(debug_assertions) {
-        eprintln!("{}", String::from_utf8(rst_vec.clone()).unwrap().trim());
-    }
+    println!("<------ {}", String::from_utf8(buf.clone()).unwrap());
 
-    String::from_utf8(rst_vec[0..rst_size].to_vec()).expect("Decode request string error!")
+    // 容忍非UTF8字符
+    String::from_utf8(buf).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 fn get_action(response: String) -> Option<Action> {
@@ -50,18 +50,18 @@ fn get_action(response: String) -> Option<Action> {
                 return None;
             }
             let type_str = &rst["type"];
-            if *type_str == JsonValue::from("copy") {
+            if let Some("copy") = type_str.as_str() {
                 let contents = &rst["contents"];
                 return Some(Action::Copying(contents.to_string()));
             }
-            if *type_str == JsonValue::from("paste") {
+            if let Some("paste") = type_str.as_str() {
                 return Some(Action::Pasting);
             }
 
             None
         }
         Err(err) => {
-            eprintln!("Parse request error: {}", err);
+            eprintln!("[ERROR] Parse request error: {}", err);
             None
         }
     }
@@ -72,9 +72,9 @@ fn compose_paste_response(content: &str) -> String {
         "type": "paste",
         "contents": content,
     };
-    if cfg!(debug_assertions) {
-        eprintln!("response: {}", response_json);
-    }
+    // if cfg!(debug_assertions) {
+    eprintln!("------> response: {}", response_json);
+    // }
     response_json.to_string()
 }
 
@@ -86,7 +86,7 @@ async fn main() {
     let mut l = tokio_listener::Listener::bind(&addr, &sys_option, &user_option)
         .await
         .unwrap();
-    println!("Listening addr {}", addr);
+    println!("[INFO ] Listening addr {}", addr);
 
     // 定义消息类型
     enum ClipboardMsg {
@@ -97,25 +97,33 @@ async fn main() {
     // 创建专用剪贴板线程
     let (clip_tx, mut clip_rx) = mpsc::channel(32);
     std::thread::spawn(move || {
-        let mut ctx = ClipboardContext::new().unwrap();
-        while let Some(msg) = clip_rx.blocking_recv() {
-            match msg {
-                ClipboardMsg::Copy(text) => {
-                    ctx.set_contents(text).unwrap();
-                }
-                ClipboardMsg::Paste(reply) => {
-                    let content = ctx.get_contents().unwrap();
-                    reply.send(content).ok();
+        let mut ctx = match ClipboardContext::new() {
+            Ok(ctx) => ctx,
+            Err(_) => {
+                eprintln!("[ERROR] failed to initialize clipboard!");
+                std::process::exit(1);
+            }
+        };
+        std::thread::spawn(move || {
+            while let Some(msg) = clip_rx.blocking_recv() {
+                match msg {
+                    ClipboardMsg::Copy(text) => {
+                        ctx.set_contents(text).unwrap();
+                    }
+                    ClipboardMsg::Paste(reply) => {
+                        let content = ctx.get_contents().unwrap();
+                        reply.send(content).ok();
+                    }
                 }
             }
-        }
+        });
     });
 
     while let Ok((mut conn, _)) = l.accept().await {
         let clip_tx = clip_tx.clone();
         tokio::spawn(async move {
             let buf = read_request_string(&mut conn).await;
-            let action = get_action(buf);
+            let action = get_action(buf.unwrap());
 
             match action {
                 Some(Action::Copying(ss)) => {
@@ -132,7 +140,7 @@ async fn main() {
                         .await
                         .unwrap();
                 }
-                _ => eprintln!("Unsupported command!"),
+                _ => eprintln!("[ERROR] Unsupported command: {:?}.", action),
             }
 
             conn.shutdown().await.unwrap();
