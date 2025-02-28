@@ -122,7 +122,7 @@ vim.g.clipboard = {
 ```
 
 - If you wanna start it on start with systemd
-In your `/usr/local/lib/systemd/user/clipboard_server.service`
+In your `~/.config/systemd/clipboard_server.service`
 
 ```txt
 [Unit]
